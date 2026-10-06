@@ -37,7 +37,7 @@ jobs:
       - name: Publish approved technical image only
         if: inputs.publish
         env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_USERNAME: pruthu3
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
         run: python3 stream_image.py --publish --repository "$IMAGE_REPOSITORY" --tag proof-v1
