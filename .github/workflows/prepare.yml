@@ -6,6 +6,10 @@ on:
         type: boolean
         default: false
         description: Publish to the pre-created Docker Hub repository
+      cpu_startup:
+        type: boolean
+        default: false
+        description: CPU-only startup check of the already published image; no inference
 permissions:
   contents: read
 concurrency:
@@ -13,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   prepare:
-    if: github.event.repository.private == false
+    if: github.event.repository.private == false && !inputs.cpu_startup
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -52,4 +56,72 @@ jobs:
           path: |
             build-receipt.json
             inspection-receipt.json
+          retention-days: 1
+
+  cpu-startup:
+    if: github.event.repository.private == false && inputs.cpu_startup && !inputs.publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      PROOF_IMAGE: pruthu3/wan-proof-worker@sha256:8c592610996ef439a02383271de9cd937dc3b47e8c1bd396f84e1d4fcbef30f1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check free AMD64 runner disk before any image download
+        run: |
+          test "$(uname -m)" = x86_64
+          df -h /
+          # Only disposable preinstalled SDKs on this fresh hosted runner.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache
+          df -h /
+          /usr/bin/python3 -c "import shutil; assert shutil.disk_usage('/').free >= 110*1024**3, 'STOP: free disk insufficient; no paid fallback'"
+          docker version
+      - name: Pull immutable public image on CPU runner
+        run: timeout 45m docker pull "$PROOF_IMAGE"
+      - name: Start ComfyUI with explicit CPU override; no generation
+        run: |
+          docker run -d --name proof-cpu --memory 12g --cpus 2 \
+            -p 127.0.0.1:8188:8188 \
+            -e PROOF_WORKFLOW_B64=e30= -e PROOF_CONTRACT_B64=e30= \
+            -v "$PWD/validate_delivery.py:/fixture/validate_delivery.py:ro" \
+            -v "$PWD/overlay/video_delivery.py:/fixture/overlay/video_delivery.py:ro" \
+            --entrypoint bash "$PROOF_IMAGE" -c '
+              set -e
+              python /proof/install_runtime.py
+              python -c "import handler; assert callable(handler.handler)"
+              exec python -u /comfyui/main.py --cpu --disable-auto-launch --disable-metadata --listen 0.0.0.0 --port 8188
+            '
+          /usr/bin/python3 - <<'PYCPU'
+          import json,time,urllib.request
+          required = {'UNETLoader','CLIPLoader','VAELoader','CLIPTextEncode','ModelSamplingSD3','Wan22ImageToVideoLatent','KSampler','VAEDecode','SaveImage','LoadImage'}
+          deadline=time.monotonic()+600
+          while True:
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:8188/object_info',timeout=5) as r:
+                      info=json.load(r)
+                  break
+              except Exception:
+                  if time.monotonic()>deadline: raise RuntimeError('CPU startup timed out')
+                  time.sleep(5)
+          assert required <= info.keys(), sorted(required-info.keys())
+          for node,key,name in [('UNETLoader','unet_name','wan2.2_ti2v_5B_fp16.safetensors'),('CLIPLoader','clip_name','umt5_xxl_fp8_e4m3fn_scaled.safetensors'),('VAELoader','vae_name','wan2.2_vae.safetensors')]:
+              assert name in info[node]['input']['required'][key][0],name
+          receipt={'image':'pruthu3/wan-proof-worker@sha256:8c592610996ef439a02383271de9cd937dc3b47e8c1bd396f84e1d4fcbef30f1','cpu_comfyui_startup':True,'required_nodes_discovered':True,'models_discovered':True,'all_model_hashes_verified_at_start':True,'wrapper_import_passed':True,'cpu_override':True,'normal_gpu_entrypoint_tested':False,'gpu_used':False,'inference_submitted':False,'provider_shutdown_verified':False}
+          open('cpu-startup-receipt.json','w').write(json.dumps(receipt,indent=2)+'\n')
+          print(json.dumps(receipt,indent=2))
+          PYCPU
+          docker exec proof-cpu python /fixture/validate_delivery.py
+      - name: Stop and verify local CPU container
+        if: always()
+        run: |
+          docker logs --tail 100 proof-cpu 2>/dev/null || true
+          if docker container inspect proof-cpu >/dev/null 2>&1; then
+            docker stop --time 10 proof-cpu
+            test "$(docker inspect -f '{{.State.Running}}' proof-cpu)" = false
+            docker rm proof-cpu
+          fi
+      - name: Save small CPU startup receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpu-startup-receipt
+          path: cpu-startup-receipt.json
           retention-days: 1
