@@ -2,6 +2,10 @@ name: Free CPU proof image preparation
 on:
   workflow_dispatch:
     inputs:
+      thin_upgrade:
+        type: boolean
+        default: false
+        description: Publish tiny higher-resolution delivery wrapper; no model download or GPU
       publish:
         type: boolean
         default: false
@@ -17,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   prepare:
-    if: github.event.repository.private == false && !inputs.cpu_startup
+    if: github.event.repository.private == false && !inputs.cpu_startup && !inputs.thin_upgrade
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -59,7 +63,7 @@ jobs:
           retention-days: 1
 
   cpu-startup:
-    if: github.event.repository.private == false && inputs.cpu_startup && !inputs.publish
+    if: github.event.repository.private == false && inputs.cpu_startup && !inputs.publish && !inputs.thin_upgrade
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -124,4 +128,38 @@ jobs:
         with:
           name: cpu-startup-receipt
           path: cpu-startup-receipt.json
+          retention-days: 1
+
+  thin-upgrade:
+    if: github.event.repository.private == false && inputs.thin_upgrade && !inputs.publish && !inputs.cpu_startup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify standard free AMD64 runner and small disk requirement
+        run: |
+          test "$(uname -m)" = x86_64
+          df -h .
+          python3 -c "import shutil; assert shutil.disk_usage('.').free > 512*1024**2"
+          if ! command -v ffmpeg || ! command -v ffprobe; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+      - name: Validate bounded contract and synthetic high-resolution delivery
+        run: |
+          python3 -m unittest discover -p 'test_worker_contract.py'
+          python3 validate_hd_delivery.py
+          python3 thin_image.py
+      - name: Publish one technical wrapper layer and verify readback
+        env:
+          DOCKERHUB_USERNAME: pruthu3
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: python3 thin_image.py --publish
+      - name: Save small receipts only
+        uses: actions/upload-artifact@v4
+        with:
+          name: thin-build-receipt
+          path: |
+            thin-build-receipt.json
+            hd-delivery-receipt.json
           retention-days: 1
