@@ -11,8 +11,8 @@ def png(frame):
  rows=b''.join(b'\x00'+bytes((frame%256,y%256,128))*1280 for y in range(704))
  return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',header)+chunk(b'IDAT',zlib.compress(rows))+chunk(b'IEND',b'')
 def main(ffmpeg=('ffmpeg',),ffprobe=('ffprobe',)):
- output={'images':[{'type':'base64','data':base64.b64encode(png(i)).decode()} for i in range(121)]}
- encoded=encode_output(output,width=1280,height=704,letterbox=False,ffmpeg=ffmpeg,ffprobe=ffprobe)
+ output={'images':[{'type':'base64','data':base64.b64encode(png(i)).decode()} for i in range(144)]}
+ encoded=encode_output(output,expected_frames=144,width=1280,height=704,letterbox=False,ffmpeg=ffmpeg,ffprobe=ffprobe)
  with tempfile.TemporaryDirectory() as folder:
   result=Path(folder)/'result.json';result.write_text(json.dumps({'status':'COMPLETED','output':encoded}))
   target=extract_video(result,Path(folder)/'fixture.mp4');assert target.is_file()
