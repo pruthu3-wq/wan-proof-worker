@@ -27,10 +27,24 @@ def delivery_spec(approved, contract):
 
 def handler(job):
     import upstream_handler
-    approved = json.loads(Path('/kael-workflow.json').read_text())
-    if job.get('input', {}).get('workflow') != approved:
-        raise ValueError('This worker accepts only the fixed first-test workflow')
+    configured = json.loads(Path('/kael-workflow.json').read_text())
     contract = json.loads(Path('/proof-contract.json').read_text())
+    if 'approved_jobs' in configured:
+        records = configured['approved_jobs']
+        if not isinstance(records, dict) or not 1 <= len(records) <= 40:
+            raise ValueError('Bounded approved job manifest required')
+        entry = records.get(job.get('input', {}).get('proof_job_id'))
+        if not isinstance(entry, dict):
+            raise ValueError('Unapproved job identifier')
+        approved = job.get('input', {}).get('workflow')
+        digest = hashlib.sha256(json.dumps(approved, sort_keys=True).encode()).hexdigest()
+        if digest != entry.get('workflow_sha256'):
+            raise ValueError('Unapproved workflow checksum')
+        contract = entry['contract']
+    else:
+        approved = configured
+        if job.get('input', {}).get('workflow') != approved:
+            raise ValueError('This worker accepts only the fixed first-test workflow')
     spec = delivery_spec(approved, contract)
     images = job['input'].get('images', [])
     if len(images) != 1 or images[0].get('name') != contract['reference_name']:
