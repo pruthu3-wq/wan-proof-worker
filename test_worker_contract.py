@@ -9,6 +9,12 @@ class ContractTests(unittest.TestCase):
   self.spec={'width':1280,'height':704,'expected_frames':121,'fps':24,'letterbox':False}
  def test_legacy(self):self.assertEqual(delivery_spec({},{}),{})
  def test_supported(self):self.assertEqual(delivery_spec(self.graph,{'video_spec':self.spec}),self.spec)
+ def test_six_second(self):
+  self.graph['1']['inputs']['length']=145
+  spec={**self.spec,'expected_frames':145}
+  self.assertEqual(delivery_spec(self.graph,{'video_spec':spec}),spec)
+ def test_frame_mismatch(self):
+  with self.assertRaises(ValueError):delivery_spec(self.graph,{'video_spec':{**self.spec,'expected_frames':145}})
  def test_wrong_geometry(self):
   self.graph['1']['inputs']['width']=640
   with self.assertRaises(ValueError):delivery_spec(self.graph,{'video_spec':self.spec})
