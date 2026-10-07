@@ -5,7 +5,7 @@ import stream_image as stream
 ROOT=Path(__file__).resolve().parent
 REPO='pruthu3/wan-proof-worker'
 BASE_DIGEST='sha256:8c592610996ef439a02383271de9cd937dc3b47e8c1bd396f84e1d4fcbef30f1'
-TAG='delivery-704-six-second-v3'
+TAG='delivery-704-approved-batch-v4'
 
 def layer_files():
     raw=(ROOT/'overlay/worker_handler.py').read_bytes()
