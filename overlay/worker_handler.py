@@ -11,7 +11,8 @@ def delivery_spec(approved, contract):
     spec = contract.get('video_spec', {})
     if not spec:
         return {}  # Preserve the already-proven 640x360 transport.
-    expected = {'width': 1280, 'height': 704, 'expected_frames': 121,
+    six_second = spec.get('expected_frames') == 145 if isinstance(spec, dict) else False
+    expected = {'width': 1280, 'height': 704, 'expected_frames': 145 if six_second else 121,
                 'fps': 24, 'letterbox': False}
     if (not isinstance(spec, dict) or spec != expected
             or any(type(spec[k]) is not type(v) for k, v in expected.items())):
@@ -19,7 +20,7 @@ def delivery_spec(approved, contract):
     latents = [n['inputs'] for n in approved.values()
                if n.get('class_type') == 'Wan22ImageToVideoLatent']
     if (len(latents) != 1 or any(latents[0].get(k) != v for k,v in
-            [('width',1280),('height',704),('length',121),('batch_size',1)])):
+            [('width',1280),('height',704),('length',145 if six_second else 121),('batch_size',1)])):
         raise ValueError('Workflow/delivery geometry mismatch')
     return spec
 
@@ -38,6 +39,11 @@ def handler(job):
     if hashlib.sha256(base64.b64decode(encoded, validate=True)).hexdigest() != contract['reference_sha256']:
         raise ValueError('Reference checksum mismatch')
     output = upstream_handler.handler(job)
+    if spec.get('expected_frames') == 145:
+        if output.get('error') or output.get('errors') or len(output.get('images', [])) != 145:
+            raise ValueError('Expected all 145 generated frames before six-second trim')
+        output = {**output, 'images': output['images'][:144]}
+        spec = {**spec, 'expected_frames': 144}
     delivered = encode_output(output, **spec)
     delivered['workflow_sha256'] = hashlib.sha256(
         json.dumps(approved, sort_keys=True).encode()).hexdigest()
